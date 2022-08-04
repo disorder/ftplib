@@ -17,6 +17,8 @@
 /* 									   */
 /***************************************************************************/
 
+#include "esp_log.h"
+const char *TAG = "ftplib";
 #if defined(__unix__) || defined(__VMS)
 #include <unistd.h>
 #endif
@@ -48,7 +50,7 @@
 #undef _REENTRANT
 #endif
 
-#define BUILDING_LIBRARY
+//#define BUILDING_LIBRARY
 #include "ftplib.h"
 
 #if defined(__UINT64_MAX) && !defined(PRIu64)
@@ -69,10 +71,6 @@
 #define RESPONSE_BUFSIZ 1024
 #define TMP_BUFSIZ 1024
 #define ACCEPT_TIMEOUT 30
-
-#define FTPLIB_CONTROL 0
-#define FTPLIB_READ 1
-#define FTPLIB_WRITE 2
 
 #if !defined FTPLIB_DEFMODE
 #define FTPLIB_DEFMODE FTPLIB_PASSIVE
@@ -96,10 +94,10 @@ struct NetBuf {
     char response[RESPONSE_BUFSIZ];
 };
 
-static char *version =
-    "ftplib Release 4.0 07-Jun-2013, copyright 1996-2003, 2013 Thomas Pfau";
+//static char *version =
+//    "ftplib Release 4.0 07-Jun-2013, copyright 1996-2003, 2013 Thomas Pfau";
 
-GLOBALDEF int ftplib_debug = 0;
+GLOBALDEF int ftplib_debug = 1;
 
 #if defined(__unix__) || defined(VMS)
 int net_read(int fd, char *buf, size_t len)
@@ -288,7 +286,7 @@ static int readline(char *buf,int max,netbuf *ctl)
     	if ((x = net_read(ctl->handle,ctl->cput,ctl->cleft)) == -1)
     	{
 	    if (ftplib_debug)
-		perror("read");
+                ESP_LOGW(TAG, "read: %s", strerror(errno));
 	    retval = -1;
 	    break;
     	}
@@ -329,7 +327,7 @@ static int writeline(const char *buf, int len, netbuf *nData)
 		if (w != FTPLIB_BUFSIZ)
 		{
 		    if (ftplib_debug)
-			printf("net_write(1) returned %d, errno = %d\n", w, errno);
+                        ESP_LOGI(TAG, "net_write(1) returned %d, errno = %d\n", w, errno);
 		    return(-1);
 		}
 		nb = 0;
@@ -344,7 +342,7 @@ static int writeline(const char *buf, int len, netbuf *nData)
 	    if (w != FTPLIB_BUFSIZ)
 	    {
 		if (ftplib_debug)
-		    printf("net_write(2) returned %d, errno = %d\n", w, errno);
+		    ESP_LOGI(TAG, "net_write(2) returned %d, errno = %d\n", w, errno);
 		return(-1);
 	    }
 	    nb = 0;
@@ -359,7 +357,7 @@ static int writeline(const char *buf, int len, netbuf *nData)
 	if (w != nb)
 	{
 	    if (ftplib_debug)
-		printf("net_write(3) returned %d, errno = %d\n", w, errno);
+		ESP_LOGI(TAG, "net_write(3) returned %d, errno = %d\n", w, errno);
 	    return(-1);
 	}
     }
@@ -378,11 +376,11 @@ static int readresp(char c, netbuf *nControl)
     if (readline(nControl->response,RESPONSE_BUFSIZ,nControl) == -1)
     {
 	if (ftplib_debug)
-	    perror("Control socket read failed");
+            ESP_LOGW(TAG, "Control socket read failed: %s", strerror(errno));
 	return 0;
     }
     if (ftplib_debug > 1)
-	fprintf(stderr,"%s",nControl->response);
+	ESP_LOGI(TAG, "%s",nControl->response);
     if (nControl->response[3] == '-')
     {
 	strncpy(match,nControl->response,3);
@@ -393,11 +391,11 @@ static int readresp(char c, netbuf *nControl)
 	    if (readline(nControl->response,RESPONSE_BUFSIZ,nControl) == -1)
 	    {
 		if (ftplib_debug)
-		    perror("Control socket read failed");
+                    ESP_LOGW(TAG, "%Control socket read failed: %s", strerror(errno));
 		return 0;
 	    }
 	    if (ftplib_debug > 1)
-		fprintf(stderr,"%s",nControl->response);
+                ESP_LOGI(TAG, "%s",nControl->response);
 	}
 	while (strncmp(nControl->response,match,4));
     }
@@ -436,24 +434,26 @@ GLOBALDEF char *FtpLastResponse(netbuf *nControl)
  *
  * return 1 if connected, 0 if not
  */
-GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
+GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
 {
     int sControl;
     struct sockaddr_in sin;
     int on=1;
     netbuf *ctrl;
     char *lhost;
-    char *pnum;
+//    char *pnum;
 
     memset(&sin,0,sizeof(sin));
     sin.sin_family = AF_INET;
+    sin.sin_port = htons(port);
     lhost = strdup(host);
+/*
     pnum = strchr(lhost,':');
     if (pnum == NULL)
 	pnum = "ftp";
     else
 	*pnum++ = '\0';
-    if (isdigit(*pnum))
+    if (isdigit((int) *pnum))
 	sin.sin_port = htons(atoi(pnum));
     else
     {
@@ -479,8 +479,9 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
 	    return 0;
 	}
 #endif
-	sin.sin_port = pse->s_port;
+        sin.sin_port = pse->s_port;
     }
+*/
     if ((sin.sin_addr.s_addr = inet_addr(lhost)) == INADDR_NONE)
     {
 	struct hostent *phe;
@@ -492,7 +493,8 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
 	     ( phe == NULL ) )
 	{
 	    if ( ftplib_debug )
-		fprintf(stderr, "gethostbyname: %s\n", hstrerror(herr));
+                ESP_LOGW(TAG, "gethostbyname failed");
+//		fprintf(stderr, "gethostbyname: %s\n", hstrerror(herr));
 	    free(lhost);
 	    return 0;
 	}
@@ -500,7 +502,8 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
     	if ((phe = gethostbyname(lhost)) == NULL)
     	{
 	    if (ftplib_debug)
-		fprintf(stderr, "gethostbyname: %s\n", hstrerror(h_errno));
+                ESP_LOGW(TAG, "gethostbyname failed");
+//		fprintf(stderr, "gethostbyname: %s\n", hstrerror(h_errno));
 	    free(lhost);
 	    return 0;
     	}
@@ -512,21 +515,23 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
     if (sControl == -1)
     {
 	if (ftplib_debug)
-	    perror("socket");
+            ESP_LOGW(TAG, "socket: %s", strerror(errno));
 	return 0;
     }
+    /*
     if (setsockopt(sControl,SOL_SOCKET,SO_REUSEADDR,
-		   SETSOCKOPT_OPTVAL_TYPE &on, sizeof(on)) == -1)
+                   SETSOCKOPT_OPTVAL_TYPE &on, sizeof(on)) == -1)
     {
-	if (ftplib_debug)
-	    perror("setsockopt");
-	net_close(sControl);
-	return 0;
+        if (ftplib_debug)
+            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
+        net_close(sControl);
+        return 0;
     }
+    */
     if (connect(sControl, (struct sockaddr *)&sin, sizeof(sin)) == -1)
     {
 	if (ftplib_debug)
-	    perror("connect");
+            ESP_LOGW(TAG, "connect: %s", strerror(errno));
 	net_close(sControl);
 	return 0;
     }
@@ -534,7 +539,7 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
     if (ctrl == NULL)
     {
 	if (ftplib_debug)
-	    perror("calloc");
+            ESP_LOGW(TAG, "calloc: %s", strerror(errno));
 	net_close(sControl);
 	return 0;
     }
@@ -542,7 +547,7 @@ GLOBALDEF int FtpConnect(const char *host, netbuf **nControl)
     if (ctrl->buf == NULL)
     {
 	if (ftplib_debug)
-	    perror("calloc");
+            ESP_LOGW(TAG, "malloc: %s", strerror(errno));
 	net_close(sControl);
 	free(ctrl);
 	return 0;
@@ -638,14 +643,14 @@ static int FtpSendCmd(const char *cmd, char expresp, netbuf *nControl)
     if (nControl->dir != FTPLIB_CONTROL)
 	return 0;
     if (ftplib_debug > 2)
-	fprintf(stderr,"%s\n",cmd);
+	ESP_LOGI(TAG, "%s\n",cmd);
     if ((strlen(cmd) + 3) > sizeof(buf))
         return 0;
     sprintf(buf,"%s\r\n",cmd);
     if (net_write(nControl->handle,buf,strlen(buf)) <= 0)
     {
 	if (ftplib_debug)
-	    perror("write");
+            ESP_LOGW(TAG, "write: %s", strerror(errno));
 	return 0;
     }
     return readresp(expresp, nControl);
@@ -687,7 +692,7 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
 	struct sockaddr_in in;
     } sin;
     struct linger lng = { 0, 0 };
-    unsigned int l;
+    socklen_t l;
     int on=1;
     netbuf *ctrl;
     char *cp;
@@ -730,7 +735,7 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
 	if (getsockname(nControl->handle, &sin.sa, &l) < 0)
 	{
 	    if (ftplib_debug)
-		perror("getsockname");
+                ESP_LOGW(TAG, "getsockname: %s", strerror(errno));
 	    return -1;
 	}
     }
@@ -738,31 +743,33 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
     if (sData == -1)
     {
 	if (ftplib_debug)
-	    perror("socket");
+            ESP_LOGW(TAG, "socket: %s", strerror(errno));
 	return -1;
     }
+    /*
     if (setsockopt(sData,SOL_SOCKET,SO_REUSEADDR,
-		   SETSOCKOPT_OPTVAL_TYPE &on,sizeof(on)) == -1)
+                   SETSOCKOPT_OPTVAL_TYPE &on,sizeof(on)) == -1)
     {
-	if (ftplib_debug)
-	    perror("setsockopt");
-	net_close(sData);
-	return -1;
+        if (ftplib_debug)
+            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
+        net_close(sData);
+        return -1;
     }
     if (setsockopt(sData,SOL_SOCKET,SO_LINGER,
 		   SETSOCKOPT_OPTVAL_TYPE &lng,sizeof(lng)) == -1)
     {
 	if (ftplib_debug)
-	    perror("setsockopt");
+            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
 	net_close(sData);
 	return -1;
     }
+    */
     if (nControl->cmode == FTPLIB_PASSIVE)
     {
 	if (connect(sData, &sin.sa, sizeof(sin.sa)) == -1)
 	{
 	    if (ftplib_debug)
-		perror("connect");
+                ESP_LOGW(TAG, "connect: %s", strerror(errno));
 	    net_close(sData);
 	    return -1;
 	}
@@ -773,14 +780,14 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
 	if (bind(sData, &sin.sa, sizeof(sin)) == -1)
 	{
 	    if (ftplib_debug)
-		perror("bind");
+                ESP_LOGW(TAG, "bind: %s", strerror(errno));
 	    net_close(sData);
 	    return -1;
 	}
 	if (listen(sData, 1) < 0)
 	{
 	    if (ftplib_debug)
-		perror("listen");
+                ESP_LOGW(TAG, "listen: %s", strerror(errno));
 	    net_close(sData);
 	    return -1;
 	}
@@ -803,14 +810,14 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
     if (ctrl == NULL)
     {
 	if (ftplib_debug)
-	    perror("calloc");
+            ESP_LOGW(TAG, "calloc: %s", strerror(errno));
 	net_close(sData);
 	return -1;
     }
     if ((mode == 'A') && ((ctrl->buf = malloc(FTPLIB_BUFSIZ)) == NULL))
     {
 	if (ftplib_debug)
-	    perror("calloc");
+            ESP_LOGW(TAG, "malloc: %s", strerror(errno));
 	net_close(sData);
 	free(ctrl);
 	return -1;
@@ -841,7 +848,7 @@ static int FtpAcceptConnection(netbuf *nData, netbuf *nControl)
 {
     int sData;
     struct sockaddr addr;
-    unsigned int l;
+    socklen_t l;
     int i;
     struct timeval tv;
     fd_set mask;
@@ -899,6 +906,9 @@ static int FtpAcceptConnection(netbuf *nData, netbuf *nControl)
 	    readresp('2', nControl);
 	    rv = 0;
 	}
+        else {
+            rv = 0;
+        }
     }
     return rv;	
 }
@@ -1049,6 +1059,7 @@ GLOBALDEF int FtpClose(netbuf *nData)
 	/* potential problem - if buffer flush fails, how to notify user? */
 	if (nData->buf != NULL)
 	    writeline(NULL, 0, nData);
+	[[fallthrough]];
       case FTPLIB_READ:
 	if (nData->buf)
 	    free(nData->buf);
@@ -1251,7 +1262,7 @@ static int FtpXfer(const char *localfile, const char *path,
 	{
 	    if ((c = FtpWrite(dbuf, l, nData)) < l)
 	    {
-		printf("short write: passed %d, wrote %d\n", l, c);
+                ESP_LOGI(TAG, "short write: passed %d, wrote %d\n", l, c);
 		rv = 0;
 		break;
 	    }
@@ -1264,7 +1275,7 @@ static int FtpXfer(const char *localfile, const char *path,
 	    if (fwrite(dbuf, 1, l, local) == 0)
 	    {
 		if (ftplib_debug)
-		    perror("localfile write");
+                    ESP_LOGW(TAG, "localfile write: %s", strerror(errno));
 		rv = 0;
 		break;
 	    }

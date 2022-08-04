@@ -20,6 +20,10 @@
 #if !defined(__FTPLIB_H)
 #define __FTPLIB_H
 
+#define FTPLIB_CONTROL 0
+#define FTPLIB_READ 1
+#define FTPLIB_WRITE 2
+
 #if defined(__unix__) || defined(VMS)
 #define GLOBALDEF
 #define GLOBALREF extern
@@ -81,7 +85,7 @@ typedef struct FtpCallbackOptions {
 GLOBALREF int ftplib_debug;
 GLOBALREF void FtpInit(void);
 GLOBALREF char *FtpLastResponse(netbuf *nControl);
-GLOBALREF int FtpConnect(const char *host, netbuf **nControl);
+GLOBALREF int FtpConnect(const char *host, int port, netbuf **nControl);
 GLOBALREF int FtpOptions(int opt, long val, netbuf *nControl);
 GLOBALREF int FtpSetCallback(const FtpCallbackOptions *opt, netbuf *nControl);
 GLOBALREF int FtpClearCallback(netbuf *nControl);
