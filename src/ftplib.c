@@ -67,10 +67,14 @@ const char *TAG = "ftplib";
 #define SETSOCKOPT_OPTVAL_TYPE (void *)
 #endif
 
+#ifndef FTPLIB_BUFSIZ
 #define FTPLIB_BUFSIZ 8192
+#endif
 #define RESPONSE_BUFSIZ 1024
 #define TMP_BUFSIZ 1024
-#define ACCEPT_TIMEOUT 30
+#ifndef FTPLIB_ACCEPT_TIMEOUT
+#define FTPLIB_ACCEPT_TIMEOUT 30
+#endif
 
 #if !defined FTPLIB_DEFMODE
 #define FTPLIB_DEFMODE FTPLIB_PASSIVE
@@ -141,7 +145,13 @@ int net_write(int fd, const char *buf, size_t len)
     }
     return done;
 }
-#define net_close close
+//#define net_close close
+void net_close(int sock)
+{
+    ESP_LOGI(TAG, "closing %d", sock);
+    if (close(sock) != 0)
+        ESP_LOGW(TAG, "close: %s", strerror(errno));
+}
 #elif defined(_WIN32)
 #define net_read(x,y,z) recv(x,y,z,0)
 #define net_write(x,y,z) send(x,y,z,0)
@@ -440,13 +450,14 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
     struct sockaddr_in sin;
     int on=1;
     netbuf *ctrl;
-    char *lhost;
+#define lhost host
+//    char *lhost;
 //    char *pnum;
 
     memset(&sin,0,sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port);
-    lhost = strdup(host);
+//    lhost = strdup(host);
 /*
     pnum = strchr(lhost,':');
     if (pnum == NULL)
@@ -482,7 +493,7 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
         sin.sin_port = pse->s_port;
     }
 */
-    if ((sin.sin_addr.s_addr = inet_addr(lhost)) == INADDR_NONE)
+    if (inet_pton(AF_INET, lhost, &sin.sin_addr.s_addr) != 1)
     {
 	struct hostent *phe;
 #ifdef _REENTRANT
@@ -493,9 +504,9 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
 	     ( phe == NULL ) )
 	{
 	    if ( ftplib_debug )
-                ESP_LOGW(TAG, "gethostbyname failed");
-//		fprintf(stderr, "gethostbyname: %s\n", hstrerror(herr));
-	    free(lhost);
+                ESP_LOGW(TAG, "gethostbyname_r failed");
+//		fprintf(stderr, "gethostbyname_r: %s\n", hstrerror(herr));
+//	    free(lhost);
 	    return 0;
 	}
 #else
@@ -504,13 +515,13 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
 	    if (ftplib_debug)
                 ESP_LOGW(TAG, "gethostbyname failed");
 //		fprintf(stderr, "gethostbyname: %s\n", hstrerror(h_errno));
-	    free(lhost);
+//	    free(lhost);
 	    return 0;
     	}
 #endif
     	memcpy((char *)&sin.sin_addr, phe->h_addr, phe->h_length);
     }
-    free(lhost);
+//    free(lhost);
     sControl = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sControl == -1)
     {
@@ -518,16 +529,14 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
             ESP_LOGW(TAG, "socket: %s", strerror(errno));
 	return 0;
     }
-    /*
     if (setsockopt(sControl,SOL_SOCKET,SO_REUSEADDR,
                    SETSOCKOPT_OPTVAL_TYPE &on, sizeof(on)) == -1)
     {
         if (ftplib_debug)
-            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
-        net_close(sControl);
-        return 0;
+            ESP_LOGW(TAG, "setsockopt SO_REUSEADDR: %s", strerror(errno));
+        //net_close(sControl);
+        //return 0;
     }
-    */
     if (connect(sControl, (struct sockaddr *)&sin, sizeof(sin)) == -1)
     {
 	if (ftplib_debug)
@@ -746,24 +755,22 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
             ESP_LOGW(TAG, "socket: %s", strerror(errno));
 	return -1;
     }
-    /*
     if (setsockopt(sData,SOL_SOCKET,SO_REUSEADDR,
                    SETSOCKOPT_OPTVAL_TYPE &on,sizeof(on)) == -1)
     {
         if (ftplib_debug)
-            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
-        net_close(sData);
-        return -1;
+            ESP_LOGW(TAG, "setsockopt SO_REUSEADDR: %s", strerror(errno));
+        //net_close(sData);
+        //return -1;
     }
     if (setsockopt(sData,SOL_SOCKET,SO_LINGER,
 		   SETSOCKOPT_OPTVAL_TYPE &lng,sizeof(lng)) == -1)
     {
 	if (ftplib_debug)
-            ESP_LOGW(TAG, "setsockopt: %s", strerror(errno));
-	net_close(sData);
-	return -1;
+            ESP_LOGW(TAG, "setsockopt SO_LINGER: %s", strerror(errno));
+        //net_close(sData);
+        //return -1;
     }
-    */
     if (nControl->cmode == FTPLIB_PASSIVE)
     {
 	if (connect(sData, &sin.sa, sizeof(sin.sa)) == -1)
@@ -858,7 +865,7 @@ static int FtpAcceptConnection(netbuf *nData, netbuf *nControl)
     FD_SET(nControl->handle, &mask);
     FD_SET(nData->handle, &mask);
     tv.tv_usec = 0;
-    tv.tv_sec = ACCEPT_TIMEOUT;
+    tv.tv_sec = FTPLIB_ACCEPT_TIMEOUT;
     i = nControl->handle;
     if (i < nData->handle)
 	i = nData->handle;
@@ -907,6 +914,7 @@ static int FtpAcceptConnection(netbuf *nData, netbuf *nControl)
 	    rv = 0;
 	}
         else {
+            ESP_LOGE(TAG, "accept: unexpected branch");
             rv = 0;
         }
     }
