@@ -75,6 +75,9 @@ const char *TAG = "ftplib";
 #ifndef FTPLIB_ACCEPT_TIMEOUT
 #define FTPLIB_ACCEPT_TIMEOUT 30
 #endif
+#ifndef FTPLIB_RW_TIMEOUT
+#define FTPLIB_RW_TIMEOUT 5
+#endif
 
 #if !defined FTPLIB_DEFMODE
 #define FTPLIB_DEFMODE FTPLIB_PASSIVE
@@ -106,6 +109,10 @@ GLOBALDEF int ftplib_debug = 1;
 #if defined(__unix__) || defined(VMS)
 int net_read(int fd, char *buf, size_t len)
 {
+#if FTPLIB_RW_TIMEOUT
+    time_t start, now;
+    time(&start);
+#endif
     while ( 1 )
     {
 	int c = read(fd, buf, len);
@@ -113,6 +120,12 @@ int net_read(int fd, char *buf, size_t len)
 	{
 	    if ( errno != EINTR && errno != EAGAIN )
 		return -1;
+#if FTPLIB_RW_TIMEOUT
+            if (time(&now) - start >= FTPLIB_RW_TIMEOUT) {
+                ESP_LOGW(TAG, "net_read: timeouted");
+                return -1;
+            }
+#endif
 	}
 	else
 	{
@@ -124,6 +137,10 @@ int net_read(int fd, char *buf, size_t len)
 int net_write(int fd, const char *buf, size_t len)
 {
     int done = 0;
+#if FTPLIB_RW_TIMEOUT
+    time_t start, now;
+    time(&start);
+#endif
     while ( len > 0 )
     {
 	int c = write( fd, buf, len );
@@ -131,6 +148,12 @@ int net_write(int fd, const char *buf, size_t len)
 	{
 	    if ( errno != EINTR && errno != EAGAIN )
 		return -1;
+#if FTPLIB_RW_TIMEOUT
+            if (time(&now) - start >= FTPLIB_RW_TIMEOUT) {
+                ESP_LOGW(TAG, "net_write: timeouted");
+                return -1;
+            }
+#endif
 	}
 	else if ( c == 0 )
 	{
@@ -248,6 +271,11 @@ static int readline(char *buf,int max,netbuf *ctl)
 	return -1;
     if (max == 0)
 	return 0;
+
+#if FTPLIB_RW_TIMEOUT
+    time_t start, now;
+    time(&start);
+#endif
     do
     {
     	if (ctl->cavail > 0)
@@ -305,6 +333,13 @@ static int readline(char *buf,int max,netbuf *ctl)
     	ctl->cleft -= x;
     	ctl->cavail += x;
     	ctl->cput += x;
+#if FTPLIB_RW_TIMEOUT
+        if (time(&now) - start >= FTPLIB_RW_TIMEOUT) {
+            retval = -1;
+            ESP_LOGW(TAG, "readline: timeouted");
+            break;
+        }
+#endif
     }
     while (1);
     return retval;
@@ -325,8 +360,18 @@ static int writeline(const char *buf, int len, netbuf *nData)
     if (nData->dir != FTPLIB_WRITE)
 	return -1;
     nbp = nData->buf;
+#if FTPLIB_RW_TIMEOUT
+    time_t start, now;
+    time(&start);
+#endif
     for (x=0; x < len; x++)
     {
+#if FTPLIB_RW_TIMEOUT
+        if (time(&now) - start >= FTPLIB_RW_TIMEOUT) {
+            ESP_LOGW(TAG, "writeline: timeouted");
+            return -1;
+        }
+#endif
 	if ((*ubp == '\n') && (lc != '\r'))
 	{
 	    if (nb == FTPLIB_BUFSIZ)
@@ -537,6 +582,11 @@ GLOBALDEF int FtpConnect(const char *host, int port, netbuf **nControl)
         //net_close(sControl);
         //return 0;
     }
+
+    struct timeval timeout = { .tv_sec = 10, .tv_usec = 0 };
+    setsockopt(sControl, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(sControl, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
     if (connect(sControl, (struct sockaddr *)&sin, sizeof(sin)) == -1)
     {
 	if (ftplib_debug)
@@ -839,8 +889,10 @@ static int FtpOpenPort(netbuf *nControl, netbuf **nData, int mode, int dir)
     ctrl->ctrl = nControl;
     if (ctrl->idletime.tv_sec || ctrl->idletime.tv_usec || ctrl->cbbytes)
 	ctrl->idlecb = nControl->idlecb;
-    else
+    else {
+        // by default nControl->idletime is 0 which returns immediately
 	ctrl->idlecb = NULL;
+    }
     nControl->data = ctrl;
     *nData = ctrl;
     return 1;
